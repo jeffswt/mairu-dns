@@ -1,6 +1,7 @@
 use std::error::Error as StdError;
 use std::fmt;
 
+#[derive(PartialEq, Eq)]
 pub enum Error {
     EmptySubdomain,
     IllegalChar,
@@ -55,6 +56,7 @@ impl StdError for Error {
     }
 }
 
+#[derive(PartialEq, Eq)]
 pub enum SubdomainName {
     Wildcard,
     Value(String),
@@ -85,13 +87,13 @@ impl SubdomainName {
             let is_hyphen = ch == '-';
             let is_ld = is_alpha_lower || is_alpha_upper || is_digit;
             let is_ldh = is_ld || is_hyphen;
+            if !is_ldh {
+                return Err(Error::IllegalChar);
+            }
             if is_first_char && !is_ld {
                 return Err(Error::UnexpectedHyphen);
             }
             is_first_char = false;
-            if !is_ldh {
-                return Err(Error::IllegalChar);
-            }
         }
         let subdomain = subdomain
             .chars()
@@ -127,6 +129,7 @@ impl fmt::Debug for SubdomainName {
     }
 }
 
+#[derive(PartialEq, Eq)]
 pub struct DomainName {
     _subdns: Vec<SubdomainName>,
 }
@@ -207,7 +210,39 @@ impl fmt::Display for DomainName {
 mod tests {
     // TODO: expect values or errors
     use crate::ns::DomainName;
+    use crate::ns::Error;
     use crate::ns::SubdomainName;
+
+    fn expect_subdomain_ok(origin: &str, target: &str) {
+        let src = SubdomainName::from_str(origin).unwrap();
+        let targ = SubdomainName::Value(String::from(target));
+        assert_eq!(src, targ);
+    }
+
+    fn expect_subdomain_error(origin: &str, error: Error) {
+        let src = SubdomainName::from_str(origin).unwrap_err();
+        assert_eq!(src, error);
+    }
+
+    fn expect_domain_pqdn_ok(origin: &str, target: DomainName) {
+        let src = DomainName::from_pqdn(origin).unwrap();
+        assert_eq!(src, target);
+    }
+
+    fn expect_domain_pqdn_error(origin: &str, error: Error) {
+        let src = DomainName::from_pqdn(origin).unwrap_err();
+        assert_eq!(src, error);
+    }
+
+    fn expect_domain_fqdn_ok(origin: &str, target: DomainName) {
+        let src = DomainName::from_fqdn(origin).unwrap();
+        assert_eq!(src, target);
+    }
+
+    fn expect_domain_fqdn_error(origin: &str, error: Error) {
+        let src = DomainName::from_fqdn(origin).unwrap_err();
+        assert_eq!(src, error);
+    }
 
     // valid subdomain names
     #[test]
@@ -270,7 +305,7 @@ mod tests {
     }
     #[test]
     fn subdomain_name_fail_unicode() {
-        SubdomainName::from_str("测试").unwrap_err();
+        expect_subdomain_error("测试", Error::IllegalChar);
     }
 
     // valid PQDN examples
