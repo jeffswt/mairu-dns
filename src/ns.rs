@@ -224,9 +224,18 @@ mod tests {
         assert_eq!(src, error);
     }
 
-    fn expect_domain_pqdn_ok(origin: &str, target: DomainName) {
+    fn expect_vec_str_to_dn(origin: Vec<&str>) -> DomainName {
+        return DomainName {
+            _subdns: origin
+                .iter()
+                .map(|&s| SubdomainName::Value(String::from(s)))
+                .collect(),
+        };
+    }
+
+    fn expect_domain_pqdn_ok(origin: &str, target: Vec<&str>) {
         let src = DomainName::from_pqdn(origin).unwrap();
-        assert_eq!(src, target);
+        assert_eq!(src, expect_vec_str_to_dn(target));
     }
 
     fn expect_domain_pqdn_error(origin: &str, error: Error) {
@@ -234,9 +243,9 @@ mod tests {
         assert_eq!(src, error);
     }
 
-    fn expect_domain_fqdn_ok(origin: &str, target: DomainName) {
+    fn expect_domain_fqdn_ok(origin: &str, target: Vec<&str>) {
         let src = DomainName::from_fqdn(origin).unwrap();
-        assert_eq!(src, target);
+        assert_eq!(src, expect_vec_str_to_dn(target));
     }
 
     fn expect_domain_fqdn_error(origin: &str, error: Error) {
@@ -247,62 +256,75 @@ mod tests {
     // valid subdomain names
     #[test]
     fn subdomain_name_sld() {
-        SubdomainName::from_str("example").unwrap();
+        expect_subdomain_ok("example", "example");
     }
+
     #[test]
     fn subdomain_name_tld_com() {
-        SubdomainName::from_str("com").unwrap();
+        expect_subdomain_ok("com", "com");
     }
+
     #[test]
     fn subdomain_name_tld_net() {
-        SubdomainName::from_str("net").unwrap();
+        expect_subdomain_ok("net", "net");
     }
+
     #[test]
     fn subdomain_name_tld_org() {
-        SubdomainName::from_str("org").unwrap();
+        expect_subdomain_ok("org", "org");
     }
+
     #[test]
     fn subdomain_name_capitalized() {
-        SubdomainName::from_str("RuStLaNG").unwrap();
+        expect_subdomain_ok("RuStLaNG", "rustlang");
     }
+
     #[test]
     fn subdomain_name_digits() {
-        SubdomainName::from_str("0123456789").unwrap();
+        expect_subdomain_ok("0123456789", "0123456789");
     }
+
     #[test]
     fn subdomain_name_alphanumeric() {
-        SubdomainName::from_str("a2c4e6g8i").unwrap();
+        expect_subdomain_ok("a2c4e6g8i", "a2c4e6g8i");
     }
+
     #[test]
     fn subdomain_name_ldh() {
-        SubdomainName::from_str("example-subdomain-1").unwrap();
+        expect_subdomain_ok("example-subdomain-1", "example-subdomain-1");
     }
+
     #[test]
     fn subdomain_name_hyphens() {
-        SubdomainName::from_str("x--------").unwrap();
+        expect_subdomain_ok("x--------", "x--------");
     }
 
     // invalid subdomain names failing
     #[test]
     fn subdomain_name_fail_empty() {
-        SubdomainName::from_str("").unwrap_err();
+        expect_subdomain_error("", Error::EmptySubdomain);
     }
+
     #[test]
     fn subdomain_name_fail_hyphen() {
-        SubdomainName::from_str("-name").unwrap_err();
+        expect_subdomain_error("-name", Error::UnexpectedHyphen);
     }
+
     #[test]
     fn subdomain_name_fail_space() {
-        SubdomainName::from_str("subdomain name").unwrap_err();
+        expect_subdomain_error("subdomain name", Error::IllegalChar);
     }
+
     #[test]
     fn subdomain_name_fail_other_ascii() {
-        SubdomainName::from_str("subdomain(name)").unwrap_err();
+        expect_subdomain_error("subdomain(name)", Error::IllegalChar);
     }
+
     #[test]
     fn subdomain_name_fail_underscore() {
-        SubdomainName::from_str("subdomain_name").unwrap_err();
+        expect_subdomain_error("subdomain_name", Error::IllegalChar);
     }
+
     #[test]
     fn subdomain_name_fail_unicode() {
         expect_subdomain_error("测试", Error::IllegalChar);
@@ -311,96 +333,118 @@ mod tests {
     // valid PQDN examples
     #[test]
     fn domain_name_example() {
-        DomainName::from_pqdn("www.example.com").unwrap();
+        expect_domain_pqdn_ok("www.example.com", vec!["www", "example", "com"]);
     }
+
     #[test]
     fn domain_name_numeric() {
-        DomainName::from_pqdn("123.456.789").unwrap();
+        expect_domain_pqdn_ok("123.456.789", vec!["123", "456", "789"]);
     }
+
     #[test]
     fn domain_name_ldh() {
-        DomainName::from_pqdn("123-server.name-234.3a3").unwrap();
+        expect_domain_pqdn_ok(
+            "123-server.name-234.3a3",
+            vec!["123-server", "name-234", "3a3"],
+        );
     }
+
     #[test]
     fn domain_name_dyno() {
-        DomainName::from_pqdn("xhttp.dyno-123.serviceprovider.com").unwrap();
+        expect_domain_pqdn_ok(
+            "xhttp.dyno-123.serviceprovider.com",
+            vec!["xhttp", "dyno-123", "serviceprovider", "com"],
+        );
     }
+
     #[test]
     fn domain_name_unicode_ext() {
-        DomainName::from_pqdn("xn--0zwm56d.com").unwrap();
+        expect_domain_pqdn_ok("xn--0zwm56d.com", vec!["xn--0zwm56d", "com"]);
     }
 
     // invalid pqdn failing
     #[test]
     fn domain_name_fail_empty() {
-        DomainName::from_pqdn("").unwrap_err();
+        expect_domain_pqdn_error("", Error::EmptyDomain);
     }
+
     #[test]
     fn domain_name_fail_empty_component() {
-        DomainName::from_pqdn("www..com").unwrap_err();
+        expect_domain_pqdn_error("www..com", Error::EmptySubdomain);
     }
+
     #[test]
     fn domain_name_fail_bad_hyphen() {
-        DomainName::from_pqdn("server.-domain.com").unwrap_err();
+        expect_domain_pqdn_error("server.-domain.com", Error::UnexpectedHyphen);
     }
+
     #[test]
     fn domain_name_fail_unicode() {
-        DomainName::from_pqdn("测试.com").unwrap_err();
+        expect_domain_pqdn_error("测试.com", Error::IllegalChar);
     }
+
     #[test]
     fn domain_name_fail_slash() {
-        DomainName::from_pqdn("www.example.com/url").unwrap_err();
+        expect_domain_pqdn_error("www.example.com/url", Error::IllegalChar);
     }
+
     #[test]
     fn domain_name_fail_space() {
-        DomainName::from_pqdn("www example.com").unwrap_err();
+        expect_domain_pqdn_error("www example.com", Error::IllegalChar);
     }
 
     // valid fqdn examples
     #[test]
     fn domain_name_fqdn_empty() {
-        DomainName::from_fqdn(".").unwrap();
+        expect_domain_fqdn_ok(".", vec![]);
     }
+
     #[test]
     fn domain_name_fqdn_example() {
-        DomainName::from_fqdn("www.example.com.").unwrap();
+        expect_domain_fqdn_ok("www.example.com.", vec!["www", "example", "com"]);
     }
+
     #[test]
     fn domain_name_fqdn_unicode() {
-        DomainName::from_fqdn("xn--0zwm56d.com.").unwrap();
+        expect_domain_fqdn_ok("xn--0zwm56d.com.", vec!["xn--0zwm56d", "com"]);
     }
 
     // certain fqdn that would fail
     #[test]
     fn domain_name_fqdn_fail_dots() {
-        DomainName::from_fqdn("multi.dots.after..").unwrap_err();
+        expect_domain_fqdn_error("multi.dots.after..", Error::EmptySubdomain);
     }
+
     #[test]
     fn domain_name_fqdn_fail_illegal_char() {
-        DomainName::from_fqdn("?.char.com.").unwrap_err();
+        expect_domain_fqdn_error("?.char.com.", Error::IllegalChar);
     }
 
     // issues considering fqdn and pqdn differences
     #[test]
     fn domain_name_fqdn_not_pqdn() {
-        DomainName::from_fqdn("www.example.com").unwrap_err();
+        expect_domain_fqdn_error("www.example.com", Error::NotFullyQualified);
     }
+
     #[test]
     fn domain_name_pqdn_not_fqdn() {
-        DomainName::from_pqdn("www.example.com.").unwrap_err();
+        expect_domain_pqdn_error("www.example.com.", Error::EmptySubdomain);
     }
 
     // RFC1034 examples
     #[test]
     fn domain_name_rfc1034_1() {
-        DomainName::from_pqdn("A.ISI.EDU").unwrap();
+        expect_domain_pqdn_ok("A.ISI.EDU", vec!["a", "isi", "edu"]);
     }
+
     #[test]
     fn domain_name_rfc1034_2() {
+        expect_domain_pqdn_ok("XX.LCS.MIT.EDU", vec!["xx", "lcs", "mit", "edu"]);
         DomainName::from_pqdn("XX.LCS.MIT.EDU").unwrap();
     }
+
     #[test]
     fn domain_name_rfc1034_3() {
-        DomainName::from_pqdn("SRI-NIC.ARPA").unwrap();
+        expect_domain_pqdn_ok("SRI-NIC.ARPA", vec!["sri-nic", "arpa"]);
     }
 }
