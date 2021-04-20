@@ -354,4 +354,18 @@ mod tests {
     fn domain_name_pqdn_not_fqdn() {
         DomainName::from_pqdn("www.example.com.").unwrap_err();
     }
+
+    // RFC1034 examples
+    #[test]
+    fn domain_name_rfc1034_1() {
+        DomainName::from_pqdn("A.ISI.EDU").unwrap();
+    }
+    #[test]
+    fn domain_name_rfc1034_2() {
+        DomainName::from_pqdn("XX.LCS.MIT.EDU").unwrap();
+    }
+    #[test]
+    fn domain_name_rfc1034_3() {
+        DomainName::from_pqdn("SRI-NIC.ARPA").unwrap();
+    }
 }
