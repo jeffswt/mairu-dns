@@ -137,13 +137,13 @@ pub struct DomainName {
 impl DomainName {
     fn from_dn(dn: &str, is_fqdn: bool) -> Result<Self, Error> {
         let mut subdomains: Vec<SubdomainName> = vec![];
-        let mut buffer: String = String::from("");
+        let mut buffer = String::from("");
         for ch in dn.chars() {
             if ch != '.' {
                 buffer.push(ch);
             } else {
                 subdomains.push(SubdomainName::from_str(&buffer)?);
-                buffer = String::from("");
+                buffer.clear();
             }
         }
         // a fully qualified domain must end with a dot
