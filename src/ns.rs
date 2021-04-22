@@ -192,23 +192,108 @@ impl fmt::Debug for DomainName {
 }
 
 #[cfg(test)]
-mod tests {
-    use crate::ns::DomainName;
-    use crate::ns::Error;
+mod tests_subdomain_ok {
     use crate::ns::SubdomainName;
 
-    fn expect_subdomain_ok(origin: &str, target: &str) {
+    fn expect(origin: &str, target: &str) {
         let src = SubdomainName::from_string(origin).unwrap();
         let targ = SubdomainName::Value(String::from(target));
         assert_eq!(src, targ);
     }
 
-    fn expect_subdomain_error(origin: &str, error: Error) {
+    #[test]
+    fn sld() {
+        expect("example", "example");
+    }
+
+    #[test]
+    fn tld_com() {
+        expect("com", "com");
+    }
+
+    #[test]
+    fn tld_net() {
+        expect("net", "net");
+    }
+
+    #[test]
+    fn tld_org() {
+        expect("org", "org");
+    }
+
+    #[test]
+    fn capitalized() {
+        expect("RuStLaNG", "rustlang");
+    }
+
+    #[test]
+    fn digits() {
+        expect("0123456789", "0123456789");
+    }
+
+    #[test]
+    fn alphanumeric() {
+        expect("a2c4e6g8i", "a2c4e6g8i");
+    }
+
+    #[test]
+    fn ldh() {
+        expect("example-subdomain-1", "example-subdomain-1");
+    }
+
+    #[test]
+    fn hyphens() {
+        expect("x--------", "x--------");
+    }
+}
+
+#[cfg(test)]
+mod tests_subdomain_fail {
+    use crate::ns::Error;
+    use crate::ns::SubdomainName;
+
+    fn expect(origin: &str, error: Error) {
         let src = SubdomainName::from_string(origin).unwrap_err();
         assert_eq!(src, error);
     }
 
-    fn expect_vec_str_to_dn(origin: Vec<&str>) -> DomainName {
+    #[test]
+    fn empty() {
+        expect("", Error::EmptySubdomain);
+    }
+
+    #[test]
+    fn hyphen() {
+        expect("-name", Error::UnexpectedHyphen);
+    }
+
+    #[test]
+    fn space() {
+        expect("subdomain name", Error::IllegalChar);
+    }
+
+    #[test]
+    fn other_ascii() {
+        expect("subdomain(name)", Error::IllegalChar);
+    }
+
+    #[test]
+    fn underscore() {
+        expect("subdomain_name", Error::IllegalChar);
+    }
+
+    #[test]
+    fn unicode() {
+        expect("测试", Error::IllegalChar);
+    }
+}
+
+#[cfg(test)]
+mod tests_domain_ok {
+    use crate::ns::DomainName;
+    use crate::ns::SubdomainName;
+
+    fn vec_str_to_dn(origin: Vec<&str>) -> DomainName {
         return DomainName {
             _subdns: origin
                 .iter()
@@ -217,212 +302,147 @@ mod tests {
         };
     }
 
-    fn expect_domain_pqdn_ok(origin: &str, target: Vec<&str>) {
+    fn pqdn_expect(origin: &str, target: Vec<&str>) {
         let src = DomainName::from_pqdn(origin).unwrap();
-        assert_eq!(src, expect_vec_str_to_dn(target));
+        assert_eq!(src, vec_str_to_dn(target));
     }
 
-    fn expect_domain_pqdn_error(origin: &str, error: Error) {
-        let src = DomainName::from_pqdn(origin).unwrap_err();
-        assert_eq!(src, error);
-    }
-
-    fn expect_domain_fqdn_ok(origin: &str, target: Vec<&str>) {
+    fn fqdn_expect(origin: &str, target: Vec<&str>) {
         let src = DomainName::from_fqdn(origin).unwrap();
-        assert_eq!(src, expect_vec_str_to_dn(target));
-    }
-
-    fn expect_domain_fqdn_error(origin: &str, error: Error) {
-        let src = DomainName::from_fqdn(origin).unwrap_err();
-        assert_eq!(src, error);
+        assert_eq!(src, vec_str_to_dn(target));
     }
 
     #[test]
-    fn subdomain_name_sld() {
-        expect_subdomain_ok("example", "example");
+    fn pqdn_example() {
+        pqdn_expect("www.example.com", vec!["www", "example", "com"]);
     }
 
     #[test]
-    fn subdomain_name_tld_com() {
-        expect_subdomain_ok("com", "com");
+    fn pqdn_numeric() {
+        pqdn_expect("123.456.789", vec!["123", "456", "789"]);
     }
 
     #[test]
-    fn subdomain_name_tld_net() {
-        expect_subdomain_ok("net", "net");
-    }
-
-    #[test]
-    fn subdomain_name_tld_org() {
-        expect_subdomain_ok("org", "org");
-    }
-
-    #[test]
-    fn subdomain_name_capitalized() {
-        expect_subdomain_ok("RuStLaNG", "rustlang");
-    }
-
-    #[test]
-    fn subdomain_name_digits() {
-        expect_subdomain_ok("0123456789", "0123456789");
-    }
-
-    #[test]
-    fn subdomain_name_alphanumeric() {
-        expect_subdomain_ok("a2c4e6g8i", "a2c4e6g8i");
-    }
-
-    #[test]
-    fn subdomain_name_ldh() {
-        expect_subdomain_ok("example-subdomain-1", "example-subdomain-1");
-    }
-
-    #[test]
-    fn subdomain_name_hyphens() {
-        expect_subdomain_ok("x--------", "x--------");
-    }
-
-    #[test]
-    fn subdomain_name_fail_empty() {
-        expect_subdomain_error("", Error::EmptySubdomain);
-    }
-
-    #[test]
-    fn subdomain_name_fail_hyphen() {
-        expect_subdomain_error("-name", Error::UnexpectedHyphen);
-    }
-
-    #[test]
-    fn subdomain_name_fail_space() {
-        expect_subdomain_error("subdomain name", Error::IllegalChar);
-    }
-
-    #[test]
-    fn subdomain_name_fail_other_ascii() {
-        expect_subdomain_error("subdomain(name)", Error::IllegalChar);
-    }
-
-    #[test]
-    fn subdomain_name_fail_underscore() {
-        expect_subdomain_error("subdomain_name", Error::IllegalChar);
-    }
-
-    #[test]
-    fn subdomain_name_fail_unicode() {
-        expect_subdomain_error("测试", Error::IllegalChar);
-    }
-
-    #[test]
-    fn domain_name_example() {
-        expect_domain_pqdn_ok("www.example.com", vec!["www", "example", "com"]);
-    }
-
-    #[test]
-    fn domain_name_numeric() {
-        expect_domain_pqdn_ok("123.456.789", vec!["123", "456", "789"]);
-    }
-
-    #[test]
-    fn domain_name_ldh() {
-        expect_domain_pqdn_ok(
+    fn pqdn_ldh() {
+        pqdn_expect(
             "123-server.name-234.3a3",
             vec!["123-server", "name-234", "3a3"],
         );
     }
 
     #[test]
-    fn domain_name_dyno() {
-        expect_domain_pqdn_ok(
+    fn pqdn_dyno() {
+        pqdn_expect(
             "xhttp.dyno-123.serviceprovider.com",
             vec!["xhttp", "dyno-123", "serviceprovider", "com"],
         );
     }
 
     #[test]
-    fn domain_name_unicode_ext() {
-        expect_domain_pqdn_ok("xn--0zwm56d.com", vec!["xn--0zwm56d", "com"]);
+    fn pqdn_unicode_ext() {
+        pqdn_expect("xn--0zwm56d.com", vec!["xn--0zwm56d", "com"]);
     }
 
     #[test]
-    fn domain_name_fail_empty() {
-        expect_domain_pqdn_error("", Error::EmptyDomain);
+    fn fqdn_empty() {
+        fqdn_expect(".", vec![]);
     }
 
     #[test]
-    fn domain_name_fail_empty_component() {
-        expect_domain_pqdn_error("www..com", Error::EmptySubdomain);
+    fn fqdn_example() {
+        fqdn_expect("www.example.com.", vec!["www", "example", "com"]);
     }
 
     #[test]
-    fn domain_name_fail_bad_hyphen() {
-        expect_domain_pqdn_error("server.-domain.com", Error::UnexpectedHyphen);
+    fn fqdn_unicode() {
+        fqdn_expect("xn--0zwm56d.com.", vec!["xn--0zwm56d", "com"]);
     }
 
     #[test]
-    fn domain_name_fail_unicode() {
-        expect_domain_pqdn_error("测试.com", Error::IllegalChar);
+    fn rfc1034_1() {
+        pqdn_expect("A.ISI.EDU", vec!["a", "isi", "edu"]);
     }
 
     #[test]
-    fn domain_name_fail_slash() {
-        expect_domain_pqdn_error("www.example.com/url", Error::IllegalChar);
+    fn rfc1034_2() {
+        pqdn_expect("XX.LCS.MIT.EDU", vec!["xx", "lcs", "mit", "edu"]);
     }
 
     #[test]
-    fn domain_name_fail_space() {
-        expect_domain_pqdn_error("www example.com", Error::IllegalChar);
+    fn rfc1034_3() {
+        pqdn_expect("SRI-NIC.ARPA", vec!["sri-nic", "arpa"]);
+    }
+}
+
+#[cfg(test)]
+mod tests_domain_fail {
+    use crate::ns::DomainName;
+    use crate::ns::Error;
+
+    fn expect_pqdn(origin: &str, error: Error) {
+        let src = DomainName::from_pqdn(origin).unwrap_err();
+        assert_eq!(src, error);
+    }
+
+    fn expect_fqdn(origin: &str, error: Error) {
+        let src = DomainName::from_fqdn(origin).unwrap_err();
+        assert_eq!(src, error);
     }
 
     #[test]
-    fn domain_name_fqdn_empty() {
-        expect_domain_fqdn_ok(".", vec![]);
+    fn pqdn_empty() {
+        expect_pqdn("", Error::EmptyDomain);
     }
 
     #[test]
-    fn domain_name_fqdn_example() {
-        expect_domain_fqdn_ok("www.example.com.", vec!["www", "example", "com"]);
+    fn pqdn_empty_component() {
+        expect_pqdn("www..com", Error::EmptySubdomain);
     }
 
     #[test]
-    fn domain_name_fqdn_unicode() {
-        expect_domain_fqdn_ok("xn--0zwm56d.com.", vec!["xn--0zwm56d", "com"]);
+    fn pqdn_bad_hyphen() {
+        expect_pqdn("server.-domain.com", Error::UnexpectedHyphen);
     }
 
     #[test]
-    fn domain_name_fqdn_fail_dots() {
-        expect_domain_fqdn_error("multi.dots.after..", Error::EmptySubdomain);
+    fn pqdn_unicode() {
+        expect_pqdn("测试.com", Error::IllegalChar);
     }
 
     #[test]
-    fn domain_name_fqdn_fail_illegal_char() {
-        expect_domain_fqdn_error("?.char.com.", Error::IllegalChar);
+    fn pqdn_slash() {
+        expect_pqdn("www.example.com/url", Error::IllegalChar);
     }
 
     #[test]
-    fn domain_name_fqdn_not_pqdn() {
-        expect_domain_fqdn_error("www.example.com", Error::NotFullyQualified);
+    fn pqdn_space() {
+        expect_pqdn("www example.com", Error::IllegalChar);
     }
 
     #[test]
-    fn domain_name_pqdn_not_fqdn() {
-        expect_domain_pqdn_error("www.example.com.", Error::EmptySubdomain);
+    fn pqdn_not_fqdn() {
+        expect_pqdn("www.example.com.", Error::EmptySubdomain);
     }
 
     #[test]
-    fn domain_name_rfc1034_1() {
-        expect_domain_pqdn_ok("A.ISI.EDU", vec!["a", "isi", "edu"]);
+    fn fqdn_dots() {
+        expect_fqdn("multi.dots.after..", Error::EmptySubdomain);
     }
 
     #[test]
-    fn domain_name_rfc1034_2() {
-        expect_domain_pqdn_ok("XX.LCS.MIT.EDU", vec!["xx", "lcs", "mit", "edu"]);
-        DomainName::from_pqdn("XX.LCS.MIT.EDU").unwrap();
+    fn fqdn_illegal_char() {
+        expect_fqdn("?.char.com.", Error::IllegalChar);
     }
 
     #[test]
-    fn domain_name_rfc1034_3() {
-        expect_domain_pqdn_ok("SRI-NIC.ARPA", vec!["sri-nic", "arpa"]);
+    fn fqdn_not_pqdn() {
+        expect_fqdn("www.example.com", Error::NotFullyQualified);
     }
+}
+
+#[cfg(test)]
+mod tests_out {
+    use crate::ns::DomainName;
 
     #[test]
     fn domain_name_out_example() {

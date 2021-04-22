@@ -162,230 +162,214 @@ impl fmt::Debug for AddrV4 {
 }
 
 #[cfg(test)]
-mod tests {
+mod tests_v4_u32 {
     use crate::addr::AddrV4;
-    use crate::addr::Error;
 
     #[test]
-    fn v4_from_u32() {
+    fn null() {
         assert_eq!(
             AddrV4::from_u32(0x0000000).unwrap(),
             AddrV4 { addr: 0x00000000 }
         );
     }
+}
 
-    #[test]
-    fn v4_str_null() {
+#[cfg(test)]
+mod tests_v4_str_ok {
+    use crate::addr::AddrV4;
+
+    fn expect(origin: &str, target: u32) {
         assert_eq!(
-            AddrV4::from_string("0.0.0.0").unwrap(),
-            AddrV4 { addr: 0x00000000 }
+            AddrV4::from_string(origin).unwrap(),
+            AddrV4 { addr: target }
         );
     }
 
     #[test]
-    fn v4_str_loopback() {
+    fn null() {
+        expect("0.0.0.0", 0x00000000);
+    }
+
+    #[test]
+    fn loopback() {
+        expect("127.0.0.1", 0x7f000001);
+    }
+
+    #[test]
+    fn broadcast() {
+        expect("255.255.255.255", 0xffffffff);
+    }
+
+    #[test]
+    fn typec() {
+        expect("192.168.1.2", 0xc0a80102);
+    }
+
+    #[test]
+    fn subnet_mask() {
+        expect("255.255.255.0", 0xffffff00);
+    }
+
+    #[test]
+    fn allow_leading_zero() {
+        expect("000000.000001.000010.000100", 0x00010a64);
+    }
+}
+
+#[cfg(test)]
+mod tests_v4_str_fail {
+    use crate::addr::AddrV4;
+    use crate::addr::Error;
+
+    fn expect(origin: &str, target: Error) {
+        assert_eq!(AddrV4::from_string(origin).unwrap_err(), target);
+    }
+
+    #[test]
+    fn illegal_char_too_long() {
+        expect("-192.168.0.1", Error::Overflow);
+    }
+
+    #[test]
+    fn illegal_char() {
+        expect("-92.168.0.1", Error::IllegalChar);
+    }
+
+    #[test]
+    fn overflow_comp_1() {
+        expect("256.0.0.0", Error::Overflow);
+    }
+
+    #[test]
+    fn overflow_comp_2() {
+        expect("0.0.0.256", Error::Overflow);
+    }
+
+    #[test]
+    fn missing_comp() {
+        expect("127.0.0", Error::MissingComponents);
+    }
+
+    #[test]
+    fn too_many_comp() {
+        expect("127.0.0.1.2", Error::Overflow);
+    }
+
+    #[test]
+    fn excessive_dot() {
+        expect("127.0.0.1.", Error::Overflow);
+    }
+
+    #[test]
+    fn null_comp() {
+        expect("127..0.0.1", Error::NullComponent);
+    }
+}
+
+#[cfg(test)]
+mod tests_v4_hex_ok {
+    use crate::addr::AddrV4;
+
+    fn expect(origin: &str, target: u32) {
+        assert_eq!(AddrV4::from_hex(origin).unwrap(), AddrV4 { addr: target });
+    }
+
+    #[test]
+    fn null() {
+        expect("00000000", 0x00000000);
+    }
+
+    #[test]
+    fn loopback() {
+        expect("7f000001", 0x7f000001);
+    }
+
+    #[test]
+    fn intranet() {
+        expect("c0a80102", 0xc0a80102);
+    }
+
+    #[test]
+    fn intranet_colon() {
+        expect("c0:a8:01:02", 0xc0a80102);
+    }
+
+    #[test]
+    fn intranet_dash() {
+        expect("c0-a8-01-02", 0xc0a80102);
+    }
+
+    #[test]
+    fn ignore_other() {
+        expect("cG0HaI8J0K1L0M2", 0xc0a80102);
+    }
+
+    #[test]
+    fn broadcast() {
+        expect("ffffffff", 0xffffffff);
+    }
+}
+
+#[cfg(test)]
+mod tests_v4_hex_fail {
+    use crate::addr::AddrV4;
+    use crate::addr::Error;
+
+    fn expect(origin: &str, target: Error) {
+        assert_eq!(AddrV4::from_hex(origin).unwrap_err(), target);
+    }
+
+    #[test]
+    fn overflow() {
+        expect("012345678", Error::Overflow);
+    }
+
+    #[test]
+    fn missing() {
+        expect("0123456", Error::MissingComponents);
+    }
+}
+
+#[cfg(test)]
+mod tests_v4_out {
+    use crate::addr::AddrV4;
+
+    fn expect_str(origin: &str, target: &str) {
         assert_eq!(
-            AddrV4::from_string("127.0.0.1").unwrap(),
-            AddrV4 { addr: 0x7f000001 }
+            AddrV4::from_string(origin).unwrap().to_string(),
+            String::from(target)
+        );
+    }
+
+    fn expect_hex(origin: &str, target: &str) {
+        assert_eq!(
+            AddrV4::from_hex(origin).unwrap().to_string(),
+            String::from(target)
         );
     }
 
     #[test]
-    fn v4_str_broadcast() {
-        assert_eq!(
-            AddrV4::from_string("255.255.255.255").unwrap(),
-            AddrV4 { addr: 0xffffffff }
-        );
+    fn str_null() {
+        expect_str("0.0.0.0", "0.0.0.0");
     }
 
     #[test]
-    fn v4_str_typec() {
-        assert_eq!(
-            AddrV4::from_string("192.168.1.2").unwrap(),
-            AddrV4 { addr: 0xc0a80102 }
-        );
+    fn str_loopback() {
+        expect_str("00127.0.000.000000001", "127.0.0.1");
     }
 
     #[test]
-    fn v4_str_subnet_mask() {
-        assert_eq!(
-            AddrV4::from_string("255.255.255.0").unwrap(),
-            AddrV4 { addr: 0xffffff00 }
-        );
+    fn hex_broadcast() {
+        expect_str("255.255.255.255", "255.255.255.255");
     }
 
     #[test]
-    fn v4_str_allow_leading_zero() {
-        assert_eq!(
-            AddrV4::from_string("000000.000001.000010.000100").unwrap(),
-            AddrV4 { addr: 0x00010a64 }
-        );
+    fn hex_subnet_mask_1() {
+        expect_hex("ff:ff:ff:00", "255.255.255.0");
     }
 
     #[test]
-    fn v4_str_fail_illegal_char_too_long() {
-        assert_eq!(
-            AddrV4::from_string("-192.168.0.1").unwrap_err(),
-            Error::Overflow
-        );
-    }
-
-    #[test]
-    fn v4_str_fail_illegal_char() {
-        assert_eq!(
-            AddrV4::from_string("-92.168.0.1").unwrap_err(),
-            Error::IllegalChar
-        );
-    }
-
-    #[test]
-    fn v4_str_fail_overflow_comp_1() {
-        assert_eq!(
-            AddrV4::from_string("256.0.0.0").unwrap_err(),
-            Error::Overflow
-        );
-    }
-
-    #[test]
-    fn v4_str_fail_overflow_comp_2() {
-        assert_eq!(
-            AddrV4::from_string("0.0.0.256").unwrap_err(),
-            Error::Overflow
-        );
-    }
-
-    #[test]
-    fn v4_str_fail_missing_comp() {
-        assert_eq!(
-            AddrV4::from_string("127.0.0").unwrap_err(),
-            Error::MissingComponents
-        );
-    }
-
-    #[test]
-    fn v4_str_fail_too_many_comp() {
-        assert_eq!(
-            AddrV4::from_string("127.0.0.1.2").unwrap_err(),
-            Error::Overflow
-        );
-    }
-
-    #[test]
-    fn v4_str_fail_excessive_dot() {
-        assert_eq!(
-            AddrV4::from_string("127.0.0.1.").unwrap_err(),
-            Error::Overflow
-        );
-    }
-
-    #[test]
-    fn v4_str_fail_null_comp() {
-        assert_eq!(
-            AddrV4::from_string("127..0.0.1").unwrap_err(),
-            Error::NullComponent
-        );
-    }
-
-    #[test]
-    fn v4_hex_null() {
-        assert_eq!(
-            AddrV4::from_hex("00000000").unwrap(),
-            AddrV4 { addr: 0x00000000 }
-        );
-    }
-
-    #[test]
-    fn v4_hex_loopback() {
-        assert_eq!(
-            AddrV4::from_hex("7f000001").unwrap(),
-            AddrV4 { addr: 0x7f000001 }
-        );
-    }
-
-    #[test]
-    fn v4_hex_intranet() {
-        assert_eq!(
-            AddrV4::from_hex("c0a80102").unwrap(),
-            AddrV4 { addr: 0xc0a80102 }
-        );
-    }
-
-    #[test]
-    fn v4_hex_intranet_colon() {
-        assert_eq!(
-            AddrV4::from_hex("c0:a8:01:02").unwrap(),
-            AddrV4 { addr: 0xc0a80102 }
-        );
-    }
-
-    #[test]
-    fn v4_hex_intranet_dash() {
-        assert_eq!(
-            AddrV4::from_hex("c0-a8-01-02").unwrap(),
-            AddrV4 { addr: 0xc0a80102 }
-        );
-    }
-
-    #[test]
-    fn v4_hex_ignore_other() {
-        assert_eq!(
-            AddrV4::from_hex("cG0HaI8J0K1L0M2").unwrap(),
-            AddrV4 { addr: 0xc0a80102 }
-        );
-    }
-
-    #[test]
-    fn v4_hex_broadcast() {
-        assert_eq!(
-            AddrV4::from_hex("ffffffff").unwrap(),
-            AddrV4 { addr: 0xffffffff }
-        );
-    }
-
-    #[test]
-    fn v4_hex_fail_overflow() {
-        assert_eq!(AddrV4::from_hex("012345678").unwrap_err(), Error::Overflow);
-    }
-
-    #[test]
-    fn v4_hex_fail_missing() {
-        assert_eq!(
-            AddrV4::from_hex("0123456").unwrap_err(),
-            Error::MissingComponents
-        );
-    }
-
-    #[test]
-    fn v4_out_null() {
-        assert_eq!(
-            AddrV4::from_string("0.0.0.0").unwrap().to_string(),
-            String::from("0.0.0.0")
-        );
-    }
-
-    #[test]
-    fn v4_out_loopback() {
-        assert_eq!(
-            AddrV4::from_string("00127.0.000.000000001")
-                .unwrap()
-                .to_string(),
-            String::from("127.0.0.1")
-        );
-    }
-
-    #[test]
-    fn v4_out_broadcast() {
-        assert_eq!(
-            AddrV4::from_string("255.255.255.255").unwrap().to_string(),
-            String::from("255.255.255.255")
-        );
-    }
-
-    #[test]
-    fn v4_out_subnet_mask() {
-        assert_eq!(
-            AddrV4::from_hex("ff:ff:ff:00").unwrap().to_string(),
-            String::from("255.255.255.0")
-        );
+    fn hex_subnet_mask_2() {
+        expect_hex("ff-ff-00-00", "255.255.0.0");
     }
 }
