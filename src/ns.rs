@@ -101,7 +101,7 @@ impl SubdomainName {
             .collect();
         Ok(subdomain)
     }
-    pub fn from_str(subdomain: &str) -> Result<Self, Error> {
+    pub fn from_string(subdomain: &str) -> Result<Self, Error> {
         if subdomain == "*" {
             Ok(Self::Wildcard)
         } else {
@@ -109,23 +109,17 @@ impl SubdomainName {
             Ok(Self::Value(subdomain))
         }
     }
-}
-
-impl fmt::Display for SubdomainName {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    pub fn to_string(&self) -> String {
         match self {
-            Self::Wildcard => f.write_fmt(format_args!("*")),
-            Self::Value(s) => f.write_fmt(format_args!("{}", s)),
+            Self::Wildcard => String::from("*"),
+            Self::Value(v) => v.to_string(),
         }
     }
 }
 
 impl fmt::Debug for SubdomainName {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Self::Wildcard => f.write_fmt(format_args!("SubdomainName::Wildcard")),
-            Self::Value(s) => f.write_fmt(format_args!("SubdomainName::Value({})", s)),
-        }
+        f.write_fmt(format_args!("SubdomainName({})", self.to_string()))
     }
 }
 
@@ -137,12 +131,12 @@ pub struct DomainName {
 impl DomainName {
     fn from_dn(dn: &str, is_fqdn: bool) -> Result<Self, Error> {
         let mut subdomains: Vec<SubdomainName> = vec![];
-        let mut buffer = String::from("");
+        let mut buffer = String::default();
         for ch in dn.chars() {
             if ch != '.' {
                 buffer.push(ch);
             } else {
-                subdomains.push(SubdomainName::from_str(&buffer)?);
+                subdomains.push(SubdomainName::from_string(&buffer)?);
                 buffer.clear();
             }
         }
@@ -156,7 +150,7 @@ impl DomainName {
             if buffer.len() == 0 {
                 return Err(Error::EmptySubdomain);
             }
-            subdomains.push(SubdomainName::from_str(&buffer)?);
+            subdomains.push(SubdomainName::from_string(&buffer)?);
         }
         Ok(Self {
             _subdns: subdomains,
@@ -174,53 +168,43 @@ impl DomainName {
         }
         Self::from_dn(pqdn, false)
     }
+    pub fn to_pqdn(&self) -> String {
+        let mut buffer = String::default();
+        let mut is_first_char = true;
+        for component in &self._subdns {
+            if !is_first_char {
+                buffer.push('.');
+            }
+            is_first_char = false;
+            buffer += &component.to_string();
+        }
+        buffer
+    }
+    pub fn to_string(&self) -> String {
+        self.to_pqdn()
+    }
 }
 
 impl fmt::Debug for DomainName {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str("DomainName(")?;
-        let mut is_first_char = true;
-        for component in &self._subdns {
-            if !is_first_char {
-                f.write_str(".")?;
-            }
-            is_first_char = false;
-            f.write_fmt(format_args!("{}", component))?;
-        }
-        f.write_str(")")?;
-        Ok(())
-    }
-}
-
-impl fmt::Display for DomainName {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let mut is_first_char = true;
-        for component in &self._subdns {
-            if !is_first_char {
-                f.write_str(".")?;
-            }
-            is_first_char = false;
-            f.write_fmt(format_args!("{}", component))?;
-        }
-        Ok(())
+        f.write_fmt(format_args!("DomainName({})", self.to_pqdn()))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    // TODO: expect values or errors
     use crate::ns::DomainName;
     use crate::ns::Error;
     use crate::ns::SubdomainName;
 
     fn expect_subdomain_ok(origin: &str, target: &str) {
-        let src = SubdomainName::from_str(origin).unwrap();
+        let src = SubdomainName::from_string(origin).unwrap();
         let targ = SubdomainName::Value(String::from(target));
         assert_eq!(src, targ);
     }
 
     fn expect_subdomain_error(origin: &str, error: Error) {
-        let src = SubdomainName::from_str(origin).unwrap_err();
+        let src = SubdomainName::from_string(origin).unwrap_err();
         assert_eq!(src, error);
     }
 
@@ -253,7 +237,6 @@ mod tests {
         assert_eq!(src, error);
     }
 
-    // valid subdomain names
     #[test]
     fn subdomain_name_sld() {
         expect_subdomain_ok("example", "example");
@@ -299,7 +282,6 @@ mod tests {
         expect_subdomain_ok("x--------", "x--------");
     }
 
-    // invalid subdomain names failing
     #[test]
     fn subdomain_name_fail_empty() {
         expect_subdomain_error("", Error::EmptySubdomain);
@@ -330,7 +312,6 @@ mod tests {
         expect_subdomain_error("测试", Error::IllegalChar);
     }
 
-    // valid PQDN examples
     #[test]
     fn domain_name_example() {
         expect_domain_pqdn_ok("www.example.com", vec!["www", "example", "com"]);
@@ -362,7 +343,6 @@ mod tests {
         expect_domain_pqdn_ok("xn--0zwm56d.com", vec!["xn--0zwm56d", "com"]);
     }
 
-    // invalid pqdn failing
     #[test]
     fn domain_name_fail_empty() {
         expect_domain_pqdn_error("", Error::EmptyDomain);
@@ -393,7 +373,6 @@ mod tests {
         expect_domain_pqdn_error("www example.com", Error::IllegalChar);
     }
 
-    // valid fqdn examples
     #[test]
     fn domain_name_fqdn_empty() {
         expect_domain_fqdn_ok(".", vec![]);
@@ -409,7 +388,6 @@ mod tests {
         expect_domain_fqdn_ok("xn--0zwm56d.com.", vec!["xn--0zwm56d", "com"]);
     }
 
-    // certain fqdn that would fail
     #[test]
     fn domain_name_fqdn_fail_dots() {
         expect_domain_fqdn_error("multi.dots.after..", Error::EmptySubdomain);
@@ -420,7 +398,6 @@ mod tests {
         expect_domain_fqdn_error("?.char.com.", Error::IllegalChar);
     }
 
-    // issues considering fqdn and pqdn differences
     #[test]
     fn domain_name_fqdn_not_pqdn() {
         expect_domain_fqdn_error("www.example.com", Error::NotFullyQualified);
@@ -431,7 +408,6 @@ mod tests {
         expect_domain_pqdn_error("www.example.com.", Error::EmptySubdomain);
     }
 
-    // RFC1034 examples
     #[test]
     fn domain_name_rfc1034_1() {
         expect_domain_pqdn_ok("A.ISI.EDU", vec!["a", "isi", "edu"]);
@@ -446,5 +422,25 @@ mod tests {
     #[test]
     fn domain_name_rfc1034_3() {
         expect_domain_pqdn_ok("SRI-NIC.ARPA", vec!["sri-nic", "arpa"]);
+    }
+
+    #[test]
+    fn domain_name_out_example() {
+        assert_eq!(
+            DomainName::from_pqdn("www.example.com")
+                .unwrap()
+                .to_string(),
+            String::from("www.example.com")
+        );
+    }
+
+    #[test]
+    fn domain_name_out_mixed() {
+        assert_eq!(
+            DomainName::from_fqdn("SERVER-1024.test.ORG.")
+                .unwrap()
+                .to_string(),
+            String::from("server-1024.test.org")
+        );
     }
 }

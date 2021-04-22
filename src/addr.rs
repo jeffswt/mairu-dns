@@ -113,7 +113,7 @@ impl AddrV4 {
         }
     }
 
-    pub fn from_str(addr: &str) -> Result<Self, Error> {
+    pub fn from_string(addr: &str) -> Result<Self, Error> {
         let mut buffer = String::from("");
         let mut res = 0;
         let mut cnt = 0;
@@ -143,31 +143,21 @@ impl AddrV4 {
             Err(Error::MissingComponents)
         }
     }
-}
 
-impl fmt::Debug for AddrV4 {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_fmt(format_args!(
-            "AddrV4({}.{}.{}.{})",
-            (self.addr >> 24) & 0xff,
-            (self.addr >> 16) & 0xff,
-            (self.addr >> 8) & 0xff,
-            self.addr & 0xff
-        ))?;
-        Ok(())
-    }
-}
-
-impl fmt::Display for AddrV4 {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_fmt(format_args!(
+    pub fn to_string(&self) -> String {
+        format!(
             "{}.{}.{}.{}",
             (self.addr >> 24) & 0xff,
             (self.addr >> 16) & 0xff,
             (self.addr >> 8) & 0xff,
             self.addr & 0xff
-        ))?;
-        Ok(())
+        )
+    }
+}
+
+impl fmt::Debug for AddrV4 {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_fmt(format_args!("AddrV4({})", self.to_string()))
     }
 }
 
@@ -187,7 +177,7 @@ mod tests {
     #[test]
     fn v4_str_null() {
         assert_eq!(
-            AddrV4::from_str("0.0.0.0").unwrap(),
+            AddrV4::from_string("0.0.0.0").unwrap(),
             AddrV4 { addr: 0x00000000 }
         );
     }
@@ -195,7 +185,7 @@ mod tests {
     #[test]
     fn v4_str_loopback() {
         assert_eq!(
-            AddrV4::from_str("127.0.0.1").unwrap(),
+            AddrV4::from_string("127.0.0.1").unwrap(),
             AddrV4 { addr: 0x7f000001 }
         );
     }
@@ -203,7 +193,7 @@ mod tests {
     #[test]
     fn v4_str_broadcast() {
         assert_eq!(
-            AddrV4::from_str("255.255.255.255").unwrap(),
+            AddrV4::from_string("255.255.255.255").unwrap(),
             AddrV4 { addr: 0xffffffff }
         );
     }
@@ -211,7 +201,7 @@ mod tests {
     #[test]
     fn v4_str_typec() {
         assert_eq!(
-            AddrV4::from_str("192.168.1.2").unwrap(),
+            AddrV4::from_string("192.168.1.2").unwrap(),
             AddrV4 { addr: 0xc0a80102 }
         );
     }
@@ -219,7 +209,7 @@ mod tests {
     #[test]
     fn v4_str_subnet_mask() {
         assert_eq!(
-            AddrV4::from_str("255.255.255.0").unwrap(),
+            AddrV4::from_string("255.255.255.0").unwrap(),
             AddrV4 { addr: 0xffffff00 }
         );
     }
@@ -227,7 +217,7 @@ mod tests {
     #[test]
     fn v4_str_allow_leading_zero() {
         assert_eq!(
-            AddrV4::from_str("000000.000001.000010.000100").unwrap(),
+            AddrV4::from_string("000000.000001.000010.000100").unwrap(),
             AddrV4 { addr: 0x00010a64 }
         );
     }
@@ -235,7 +225,7 @@ mod tests {
     #[test]
     fn v4_str_fail_illegal_char_too_long() {
         assert_eq!(
-            AddrV4::from_str("-192.168.0.1").unwrap_err(),
+            AddrV4::from_string("-192.168.0.1").unwrap_err(),
             Error::Overflow
         );
     }
@@ -243,25 +233,31 @@ mod tests {
     #[test]
     fn v4_str_fail_illegal_char() {
         assert_eq!(
-            AddrV4::from_str("-92.168.0.1").unwrap_err(),
+            AddrV4::from_string("-92.168.0.1").unwrap_err(),
             Error::IllegalChar
         );
     }
 
     #[test]
     fn v4_str_fail_overflow_comp_1() {
-        assert_eq!(AddrV4::from_str("256.0.0.0").unwrap_err(), Error::Overflow);
+        assert_eq!(
+            AddrV4::from_string("256.0.0.0").unwrap_err(),
+            Error::Overflow
+        );
     }
 
     #[test]
     fn v4_str_fail_overflow_comp_2() {
-        assert_eq!(AddrV4::from_str("0.0.0.256").unwrap_err(), Error::Overflow);
+        assert_eq!(
+            AddrV4::from_string("0.0.0.256").unwrap_err(),
+            Error::Overflow
+        );
     }
 
     #[test]
     fn v4_str_fail_missing_comp() {
         assert_eq!(
-            AddrV4::from_str("127.0.0").unwrap_err(),
+            AddrV4::from_string("127.0.0").unwrap_err(),
             Error::MissingComponents
         );
     }
@@ -269,20 +265,23 @@ mod tests {
     #[test]
     fn v4_str_fail_too_many_comp() {
         assert_eq!(
-            AddrV4::from_str("127.0.0.1.2").unwrap_err(),
+            AddrV4::from_string("127.0.0.1.2").unwrap_err(),
             Error::Overflow
         );
     }
 
     #[test]
     fn v4_str_fail_excessive_dot() {
-        assert_eq!(AddrV4::from_str("127.0.0.1.").unwrap_err(), Error::Overflow);
+        assert_eq!(
+            AddrV4::from_string("127.0.0.1.").unwrap_err(),
+            Error::Overflow
+        );
     }
 
     #[test]
     fn v4_str_fail_null_comp() {
         assert_eq!(
-            AddrV4::from_str("127..0.0.1").unwrap_err(),
+            AddrV4::from_string("127..0.0.1").unwrap_err(),
             Error::NullComponent
         );
     }
@@ -353,6 +352,40 @@ mod tests {
         assert_eq!(
             AddrV4::from_hex("0123456").unwrap_err(),
             Error::MissingComponents
+        );
+    }
+
+    #[test]
+    fn v4_out_null() {
+        assert_eq!(
+            AddrV4::from_string("0.0.0.0").unwrap().to_string(),
+            String::from("0.0.0.0")
+        );
+    }
+
+    #[test]
+    fn v4_out_loopback() {
+        assert_eq!(
+            AddrV4::from_string("00127.0.000.000000001")
+                .unwrap()
+                .to_string(),
+            String::from("127.0.0.1")
+        );
+    }
+
+    #[test]
+    fn v4_out_broadcast() {
+        assert_eq!(
+            AddrV4::from_string("255.255.255.255").unwrap().to_string(),
+            String::from("255.255.255.255")
+        );
+    }
+
+    #[test]
+    fn v4_out_subnet_mask() {
+        assert_eq!(
+            AddrV4::from_hex("ff:ff:ff:00").unwrap().to_string(),
+            String::from("255.255.255.0")
         );
     }
 }
