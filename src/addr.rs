@@ -7,6 +7,7 @@ pub enum Error {
     Overflow,
     NullComponent,
     MissingComponents,
+    DoubleCompression,
 }
 
 impl fmt::Debug for Error {
@@ -16,6 +17,7 @@ impl fmt::Debug for Error {
             Self::Overflow => write!(f, "Overflow"),
             Self::NullComponent => write!(f, "NullComponent"),
             Self::MissingComponents => write!(f, "MissingComponents"),
+            Self::DoubleCompression => write!(f, "DoubleCompression"),
         }
     }
 }
@@ -26,6 +28,7 @@ impl fmt::Display for Error {
             Self::Overflow => write!(f, "Too large an input for IP address"),
             Self::NullComponent => write!(f, "Empty component"),
             Self::MissingComponents => write!(f, "Missing components for IP address"),
+            Self::DoubleCompression => write!(f, "Multiple '::' occurences"),
         }
     }
 }
@@ -37,6 +40,7 @@ impl StdError for Error {
             Self::Overflow => "Too large an input for IP address",
             Self::NullComponent => "Empty component",
             Self::MissingComponents => "Missing components for IP address",
+            Self::DoubleCompression => "Multiple '::' occurences",
         }
     }
     fn cause(&self) -> Option<&dyn StdError> {
@@ -45,6 +49,7 @@ impl StdError for Error {
             Self::Overflow => None,
             Self::NullComponent => None,
             Self::MissingComponents => None,
+            Self::DoubleCompression => None,
         }
     }
 }
@@ -83,7 +88,7 @@ impl AddrV4 {
     }
 
     pub fn from_u32(addr: u32) -> Result<Self, Error> {
-        Ok(AddrV4 { addr })
+        Ok(Self { addr })
     }
 
     pub fn from_hex(addr: &str) -> Result<Self, Error> {
@@ -107,7 +112,7 @@ impl AddrV4 {
             cnt += 1;
         }
         if cnt == 8 {
-            Ok(AddrV4 { addr: irepr })
+            Ok(Self { addr: irepr })
         } else {
             Err(Error::MissingComponents)
         }
@@ -138,7 +143,7 @@ impl AddrV4 {
         cnt += 1;
         // check for count mismatch
         if cnt == 4 {
-            Ok(AddrV4 { addr: res })
+            Ok(Self { addr: res })
         } else {
             Err(Error::MissingComponents)
         }
@@ -158,6 +163,170 @@ impl AddrV4 {
 impl fmt::Debug for AddrV4 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_fmt(format_args!("AddrV4({})", self.to_string()))
+    }
+}
+
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+pub struct AddrV6 {
+    addr: u128,
+}
+
+impl AddrV6 {
+    pub fn hextet_to_u16(hextet: &str) -> Result<u16, Error> {
+        let mut comp: u16 = 0;
+        // length-related issues
+        if hextet.len() == 0 {
+            return Err(Error::NullComponent);
+        } else if hextet.len() > 4 {
+            return Err(Error::Overflow);
+        }
+        // iterate chars and converto to int
+        for ch in hextet.chars() {
+            let mut _cur = 0;
+            match ch {
+                '0'..='9' => _cur = ch as u8 - '0' as u8,
+                'a'..='f' => _cur = ch as u8 - 'a' as u8 + 10,
+                'A'..='F' => _cur = ch as u8 - 'A' as u8 + 10,
+                _ => return Err(Error::IllegalChar),
+            }
+            comp = (comp << 4) | _cur as u16;
+        }
+        Ok(comp)
+    }
+    pub fn from_u128(addr: u128) -> Result<Self, Error> {
+        Ok(Self { addr })
+    }
+    pub fn from_string(addr: &str) -> Result<Self, Error> {
+        // ensure that no two '::' appears and split into prefix and suffix
+        let mut parts: Vec<Vec<String>> = String::from(addr)
+            .split("::")
+            .map(|part| {
+                String::from(part)
+                    .split(":")
+                    .map(|s| String::from(s))
+                    .collect()
+            })
+            .collect();
+        // part length verdict
+        let mut prefix = vec![];
+        let mut suffix = vec![];
+        match parts.len() {
+            0 => return Err(Error::MissingComponents),
+            1 => {
+                suffix.append(&mut parts[0]);
+                if suffix.len() < 8 {
+                    return Err(Error::MissingComponents);
+                } else if suffix.len() > 8 {
+                    return Err(Error::Overflow);
+                }
+            }
+            2 => {
+                prefix.append(&mut parts[0]);
+                suffix.append(&mut parts[1]);
+                // compression of ':0:' into '::' is allowed as input
+            }
+            _ => return Err(Error::DoubleCompression),
+        }
+        // convert prefix and suffix
+        let mut prefix_i: u128 = 0;
+        let mut suffix_i: u128 = 0;
+        for s in &prefix {
+            let cur = Self::hextet_to_u16(&s)?;
+            prefix_i = (prefix_i << 16) | cur as u128;
+        }
+        for s in &suffix {
+            let cur = Self::hextet_to_u16(&s)?;
+            suffix_i = (suffix_i << 16) | cur as u128;
+        }
+        if prefix.len() > 0 {
+            suffix_i |= prefix_i << 16 * (8 - prefix.len());
+        }
+        Ok(Self { addr: suffix_i })
+    }
+    pub fn to_string(&self) -> String {
+        // rfc5952, section 4:
+        //     The recommendation in this section SHOULD be followed by systems
+        //     when generating an address to be represented as text, but all
+        //     implementations MUST accept and be able to handle any legitimate
+        //     [RFC4291] format.
+        if self.addr == 0 {
+            return String::from("::");
+        }
+        // split u128 into hextets
+        let mut hextets = [0; 8];
+        let mut dp = [0; 8];
+        for i in 0..8 {
+            hextets[i] = (self.addr >> 16 * (7 - i)) & 0xffff;
+            dp[i] = if hextets[i] == 0 {
+                (if i > 0 { dp[i - 1] } else { 0 }) + 1
+            } else {
+                0
+            };
+        }
+        // rfc5952, section 4.2.1., Shorten as Much as Possible
+        //     The use of the symbol "::" MUST be used to its maximum
+        //     capability. For example, 2001:db8:0:0:0:0:2:1 must be shortened
+        //     to 2001:db8::2:1. Likewise, 2001:db8::0:1 is not acceptable,
+        //     because the symbol "::" could have been used to produce a
+        //     shorter representation 2001:db8::1.
+        // rfc5952, section 4.2.3., Choice in Placement of "::"
+        //     When there is an alternative choice in the placement of a "::",
+        //     the longest run of consecutive 16-bit 0 fields MUST be shortened
+        //     (i.e., the sequence with three consecutive zero fields is
+        //     shortened in 2001:0:0:1:0:0:0:1).  When the length of the
+        //     consecutive 16-bit 0 fields are equal (i.e.,
+        //     2001:db8:0:0:1:0:0:1), the first sequence of zero bits MUST be
+        //     shortened.  For example, 2001:db8::1:0:0:1 is correct
+        //     representation.
+        // locate unique compress position
+        let mut max_len = 0;
+        let mut max_pos = 0;
+        for i in 0..8 {
+            if dp[i] > max_len {
+                max_len = dp[i];
+                max_pos = i as i32;
+            }
+        }
+        // rfc5952, section 4.2.2., Handling One 16-Bit 0 Field
+        //     The symbol "::" MUST NOT be used to shorten just one 16-bit 0
+        //     field. For example, the representation 2001:db8:0:1:1:1:1:1 is
+        //     correct, but 2001:db8::1:1:1:1:1 is not correct.
+        // rfc5952, section 4.3., Lowercase
+        //     The characters "a", "b", "c", "d", "e", and "f" in an IPv6
+        //     address MUST be represented in lowercase.
+        // perform compression, join and leave
+        if max_len > 1 {
+            let idx_to_str = |&i| format!("{:x}", hextets[i as usize]);
+            let pre_i: Vec<i32> = (0..=max_pos - max_len).collect();
+            let suf_i: Vec<i32> = (max_pos + 1..8).collect();
+            println!("error: {:?}, {}, {}", pre_i, max_pos, max_len);
+            let mut prefix: Vec<String> = pre_i.iter().map(idx_to_str).collect();
+            prefix.push(String::default());
+            prefix.append(&mut suf_i.iter().map(idx_to_str).collect());
+            // fix prefix / suffix compression problems
+            let len = prefix.len();
+            if prefix[0] == "" {
+                prefix[0].push(':');
+            } else if prefix[len - 1] == "" {
+                prefix[len - 1].push(':');
+            }
+            prefix
+        } else {
+            hextets.iter().map(|v| format!("{:x}", v)).collect()
+        }
+        .join(":")
+    }
+}
+
+impl fmt::Debug for AddrV6 {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_fmt(format_args!("AddrV6({})", self.to_string()))
+    }
+}
+
+impl fmt::Display for AddrV6 {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str(&self.to_string())
     }
 }
 
@@ -371,5 +540,182 @@ mod tests_v4_out {
     #[test]
     fn hex_subnet_mask_2() {
         expect_hex("ff-ff-00-00", "255.255.0.0");
+    }
+}
+
+#[cfg(test)]
+mod tests_v6_ok {
+    use crate::addr::AddrV6;
+
+    fn expect(origin: &str, target: u128) {
+        assert_eq!(
+            AddrV6::from_string(origin).unwrap(),
+            AddrV6 { addr: target }
+        );
+    }
+
+    #[test]
+    fn rfc5952_intro_full() {
+        expect(
+            "2001:0db8:0000:0000:0001:0000:0000:0001",
+            0x2001_0db8_0000_0000_0001_0000_0000_0001,
+        );
+    }
+
+    #[test]
+    fn rfc5952_intro_no_prefix_zero() {
+        expect(
+            "2001:db8:0:0:1:0:0:1",
+            0x2001_0db8_0000_0000_0001_0000_0000_0001,
+        );
+    }
+
+    #[test]
+    fn rfc5952_intro_some_prefix_zero() {
+        expect(
+            "2001:0db8:0:0:1:0:0:1",
+            0x2001_0db8_0000_0000_0001_0000_0000_0001,
+        );
+    }
+
+    #[test]
+    fn rfc5952_intro_simplified() {
+        expect(
+            "2001:db8::1:0:0:1",
+            0x2001_0db8_0000_0000_0001_0000_0000_0001,
+        );
+    }
+
+    #[test]
+    fn rfc5952_intro_partial_simplified() {
+        expect(
+            "2001:db8::0:1:0:0:1",
+            0x2001_0db8_0000_0000_0001_0000_0000_0001,
+        );
+    }
+
+    #[test]
+    fn rfc5952_intro_simplified_with_prefix_zero() {
+        expect(
+            "2001:0db8::1:0:0:1",
+            0x2001_0db8_0000_0000_0001_0000_0000_0001,
+        );
+    }
+
+    #[test]
+    fn rfc5952_intro_alt_simplified() {
+        expect(
+            "2001:db8:0:0:1::1",
+            0x2001_0db8_0000_0000_0001_0000_0000_0001,
+        );
+    }
+
+    #[test]
+    fn rfc5952_intro_alt_simplified_with_prefix_zero() {
+        expect(
+            "2001:db8:0000:0:1::1",
+            0x2001_0db8_0000_0000_0001_0000_0000_0001,
+        );
+    }
+
+    #[test]
+    fn rfc5952_intro_alt_simplified_caps() {
+        expect(
+            "2001:DB8:0:0:1::1",
+            0x2001_0db8_0000_0000_0001_0000_0000_0001,
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests_v6_fail {
+    use crate::addr::AddrV6;
+    use crate::addr::Error;
+
+    fn expect(origin: &str, target: Error) {
+        assert_eq!(AddrV6::from_string(origin).unwrap_err(), target);
+    }
+}
+
+#[cfg(test)]
+mod tests_v6_out_general {
+    use crate::addr::AddrV6;
+
+    fn expect(origin: u128, target: &str) {
+        assert_eq!(AddrV6 { addr: origin }.to_string(), String::from(target));
+    }
+
+    #[test]
+    fn empty() {
+        expect(0x0000_0000_0000_0000_0000_0000_0000_0000, "::");
+    }
+
+    #[test]
+    fn full() {
+        expect(
+            0x111a_22ab_33bc_44cd_55de_66ef_777f_8888,
+            "111a:22ab:33bc:44cd:55de:66ef:777f:8888",
+        );
+    }
+
+    #[test]
+    fn no_prefix_zero() {
+        expect(
+            0x1111_022a_003b_0004_0000_5d00_0e60_07f7,
+            "1111:22a:3b:4:0:5d00:e60:7f7",
+        );
+    }
+
+    #[test]
+    fn leading_zero() {
+        expect(0x0000_0000_0000_0000_0000_0000_0000_1234, "::1234");
+    }
+
+    #[test]
+    fn trailing_zero() {
+        expect(0x4321_0000_0000_0000_0000_0000_0000_0000, "4321::");
+    }
+
+    #[test]
+    fn middle_zero() {
+        expect(0x001a_0000_0000_0000_0000_0000_0000_b400, "1a::b400");
+    }
+
+    #[test]
+    fn typical_addr() {
+        expect(0x9231_0db8_0000_0000_0000_0000_0000_0001, "9231:db8::1");
+    }
+
+    #[test]
+    fn compress_longest_former() {
+        expect(0x0000_0000_0000_0000_1234_0000_0000_abcd, "::1234:0:0:abcd");
+    }
+
+    #[test]
+    fn compress_longest_latter() {
+        expect(0x0000_0000_1234_0000_0000_0000_0000_0abc, "0:0:1234::abc");
+    }
+
+    #[test]
+    fn compress_equal_first() {
+        expect(
+            0x9231_0000_0000_0db8_0acd_0000_0000_0192,
+            "9231::db8:acd:0:0:192",
+        );
+    }
+
+    #[test]
+    fn all_zero_but_last() {
+        expect(0x0000_0000_0000_0000_0000_0000_0000_0001, "::1");
+    }
+
+    #[test]
+    fn all_zero_but_first() {
+        expect(0x00a_0000_0000_0000_0000_0000_0000_0000, "a::");
+    }
+
+    #[test]
+    fn no_shorten_single() {
+        expect(0x0001_0000_0001_0000_0001_0000_0001_0000, "1:0:1:0:1:0:1:0");
     }
 }
