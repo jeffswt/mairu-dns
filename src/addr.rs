@@ -175,9 +175,12 @@ impl AddrV6 {
     pub fn hextet_to_u16(hextet: &str) -> Result<u16, Error> {
         let mut comp: u16 = 0;
         // length-related issues
-        // it should be noted that Error::NullComponent would never be raised
-        //     because `from_string` won't let me
-        if hextet.len() > 4 {
+        // though in normal cases, Error::NullComponent would never be raised
+        //     because `from_string` won't let it, triple-colons (':::') will
+        //     however trigger an error.
+        if hextet.len() == 0 {
+            return Err(Error::NullComponent);
+        } else if hextet.len() > 4 {
             return Err(Error::Overflow);
         }
         // iterate chars and converto to int
@@ -204,7 +207,6 @@ impl AddrV6 {
                 String::from(part)
                     .split(":")
                     .map(|s| String::from(s))
-                    .filter(|s| s.len() > 0)
                     .collect()
             })
             .collect();
@@ -230,6 +232,13 @@ impl AddrV6 {
                 //     zeros. The use of "::" indicates one or more groups of
                 //     16 bits of zeros. The "::" can only appear once in an
                 //     address.
+                // '^::.*$' and '^.*::$' should be taken care of
+                if prefix.len() == 1 && prefix[0].len() == 0 {
+                    prefix.clear();
+                }
+                if suffix.len() == 1 && suffix[0].len() == 0 {
+                    suffix.clear();
+                }
                 // compression of ':0:' into '::' is allowed as input
                 // however compression of ': :' into '::' is never allowed
                 // considering the semantics of '::', overflow is raised as it
@@ -812,6 +821,26 @@ mod tests_v6_fail {
     #[test]
     fn missing_components() {
         expect("1:2:3:4:5:6:7", Error::MissingComponents);
+    }
+
+    #[test]
+    fn too_many_colons_begin() {
+        expect(":::2", Error::NullComponent);
+    }
+
+    #[test]
+    fn too_many_colons_middle() {
+        expect("1:::2", Error::NullComponent);
+    }
+
+    #[test]
+    fn too_many_colons_end() {
+        expect("1:::", Error::NullComponent);
+    }
+
+    #[test]
+    fn too_many_colons_4() {
+        expect("1::::2", Error::DoubleCompression);
     }
 }
 
