@@ -175,9 +175,9 @@ impl AddrV6 {
     pub fn hextet_to_u16(hextet: &str) -> Result<u16, Error> {
         let mut comp: u16 = 0;
         // length-related issues
-        if hextet.len() == 0 {
-            return Err(Error::NullComponent);
-        } else if hextet.len() > 4 {
+        // it should be noted that Error::NullComponent would never be raised
+        //     because `from_string` won't let me
+        if hextet.len() > 4 {
             return Err(Error::Overflow);
         }
         // iterate chars and converto to int
@@ -204,6 +204,7 @@ impl AddrV6 {
                 String::from(part)
                     .split(":")
                     .map(|s| String::from(s))
+                    .filter(|s| s.len() > 0)
                     .collect()
             })
             .collect();
@@ -223,7 +224,19 @@ impl AddrV6 {
             2 => {
                 prefix.append(&mut parts[0]);
                 suffix.append(&mut parts[1]);
+                // rfc4291, section 2.2, 2.
+                //     In order to make writing addresses containing zero bits
+                //     easier, a special syntax is available to compress the
+                //     zeros. The use of "::" indicates one or more groups of
+                //     16 bits of zeros. The "::" can only appear once in an
+                //     address.
                 // compression of ':0:' into '::' is allowed as input
+                // however compression of ': :' into '::' is never allowed
+                // considering the semantics of '::', overflow is raised as it
+                //     will imply at least a ':0:' component
+                if prefix.len() + suffix.len() >= 8 {
+                    return Err(Error::Overflow);
+                }
             }
             _ => return Err(Error::DoubleCompression),
         }
@@ -625,6 +638,114 @@ mod tests_v6_ok {
             0x2001_0db8_0000_0000_0001_0000_0000_0001,
         );
     }
+
+    #[test]
+    fn rfc_4291_2_2_uncomp_unicast() {
+        expect(
+            "2001:DB8:0:0:8:800:200C:417A",
+            0x2001_0db8_0000_0000_0008_0800_200c_417a,
+        );
+    }
+
+    #[test]
+    fn rfc_4291_2_2_uncomp_multicast() {
+        expect(
+            "FF01:0:0:0:0:0:0:101",
+            0xff01_0000_0000_0000_0000_0000_0000_0101,
+        );
+    }
+
+    #[test]
+    fn rfc_4291_2_2_uncomp_loopback() {
+        expect("0:0:0:0:0:0:0:1", 0x0000_0000_0000_0000_0000_0000_0000_0001);
+    }
+
+    #[test]
+    fn rfc_4291_2_2_uncomp_unspecified() {
+        expect("0:0:0:0:0:0:0:0", 0x0000_0000_0000_0000_0000_0000_0000_0000);
+    }
+
+    #[test]
+    fn rfc_4291_2_2_comp_unicast() {
+        expect(
+            "2001:db8::8:800:200c:417a",
+            0x2001_0db8_0000_0000_0008_0800_200c_417a,
+        );
+    }
+
+    #[test]
+    fn rfc_4291_2_2_comp_multicast() {
+        expect("ff01::101", 0xff01_0000_0000_0000_0000_0000_0000_0101);
+    }
+
+    #[test]
+    fn rfc_4291_2_2_comp_loopback() {
+        expect("::1", 0x0000_0000_0000_0000_0000_0000_0000_0001);
+    }
+
+    #[test]
+    fn rfc_4291_2_2_comp_unspecified() {
+        expect("::", 0x0000_0000_0000_0000_0000_0000_0000_0000);
+    }
+
+    #[test]
+    fn allow_lower() {
+        expect(
+            "0001:0002:000a:000b:000c:000d:000e:000f",
+            0x0001_0002_000a_000b_000c_000d_000e_000f,
+        );
+    }
+
+    #[test]
+    fn allow_caps() {
+        expect(
+            "0001:0002:000A:000B:000C:000D:000E:000F",
+            0x0001_0002_000a_000b_000c_000d_000e_000f,
+        );
+    }
+
+    #[test]
+    fn allow_useless_comp_front() {
+        expect(
+            "::0002:0003:0004:0005:0006:0007:0008",
+            0x0000_0002_0003_0004_0005_0006_0007_0008,
+        );
+    }
+
+    #[test]
+    fn allow_useless_comp_middle() {
+        expect(
+            "0001:0002:0003:0004::0006:0007:0008",
+            0x0001_0002_0003_0004_0000_0006_0007_0008,
+        );
+    }
+    #[test]
+    fn allow_useless_comp_end() {
+        expect(
+            "0001:0002:0003:0004:0005:0006:0007::",
+            0x0001_0002_0003_0004_0005_0006_0007_0000,
+        );
+    }
+
+    #[test]
+    fn compress_end() {
+        expect("1::", 0x0001_0000_0000_0000_0000_0000_0000_0000);
+    }
+
+    #[test]
+    fn compress_one_front() {
+        expect("::2:3:4:5:6:7:8", 0x0000_0002_0003_0004_0005_0006_0007_0008);
+    }
+
+    #[test]
+    fn compress_one_middle() {
+        expect("1:2:3::5:6:7:8", 0x0001_0002_0003_0000_0005_0006_0007_0008);
+    }
+
+    #[test]
+    fn compress_one_end() {
+        expect("1:2:3:4:5:6:7::", 0x0001_0002_0003_0004_0005_0006_0007_0000);
+    }
 }
 
 #[cfg(test)]
@@ -635,10 +756,67 @@ mod tests_v6_fail {
     fn expect(origin: &str, target: Error) {
         assert_eq!(AddrV6::from_string(origin).unwrap_err(), target);
     }
+
+    #[test]
+    fn overflow() {
+        expect(
+            "0001:0002:0003:0004:0005:0006:0007:0008:0009",
+            Error::Overflow,
+        );
+    }
+
+    #[test]
+    fn compressing_nothing_front() {
+        expect("::0001:0002:0003:0004:0005:0006:0007:0008", Error::Overflow);
+    }
+
+    #[test]
+    fn compressing_nothing_middle() {
+        expect("0001:0002:0003:0004::0005:0006:0007:0008", Error::Overflow);
+    }
+    #[test]
+    fn compressing_nothing_end() {
+        expect("0001:0002:0003:0004:0005:0006:0007:0008::", Error::Overflow);
+    }
+
+    #[test]
+    fn component_too_large_just_a_zero() {
+        expect("01234::", Error::Overflow);
+    }
+
+    #[test]
+    fn component_too_large_really() {
+        expect("1234f::", Error::Overflow);
+    }
+
+    #[test]
+    fn illegal_char() {
+        expect("123g::", Error::IllegalChar);
+    }
+
+    #[test]
+    fn illegal_char_space() {
+        expect("123: 456::", Error::IllegalChar);
+    }
+
+    #[test]
+    fn double_compression() {
+        expect("1::2::3", Error::DoubleCompression);
+    }
+
+    #[test]
+    fn double_compression_but_inferrable() {
+        expect("1::2::3:4:5:6:7:8", Error::DoubleCompression);
+    }
+
+    #[test]
+    fn missing_components() {
+        expect("1:2:3:4:5:6:7", Error::MissingComponents);
+    }
 }
 
 #[cfg(test)]
-mod tests_v6_out_general {
+mod tests_v6_out {
     use crate::addr::AddrV6;
 
     fn expect(origin: u128, target: &str) {
