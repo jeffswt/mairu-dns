@@ -8,6 +8,7 @@ pub enum Error {
     NullComponent,
     MissingComponents,
     DoubleCompression,
+    DeprecatedV4,
 }
 
 impl fmt::Debug for Error {
@@ -18,6 +19,7 @@ impl fmt::Debug for Error {
             Self::NullComponent => write!(f, "NullComponent"),
             Self::MissingComponents => write!(f, "MissingComponents"),
             Self::DoubleCompression => write!(f, "DoubleCompression"),
+            Self::DeprecatedV4 => write!(f, "DeprecatedV4"),
         }
     }
 }
@@ -29,6 +31,7 @@ impl fmt::Display for Error {
             Self::NullComponent => write!(f, "Empty component"),
             Self::MissingComponents => write!(f, "Missing components for IP address"),
             Self::DoubleCompression => write!(f, "Multiple '::' occurences"),
+            Self::DeprecatedV4 => write!(f, "Deprecated 4to6 address format"),
         }
     }
 }
@@ -41,6 +44,7 @@ impl StdError for Error {
             Self::NullComponent => "Empty component",
             Self::MissingComponents => "Missing components for IP address",
             Self::DoubleCompression => "Multiple '::' occurences",
+            Self::DeprecatedV4 => "Deprecated 4to6 address format",
         }
     }
     fn cause(&self) -> Option<&dyn StdError> {
@@ -50,6 +54,7 @@ impl StdError for Error {
             Self::NullComponent => None,
             Self::MissingComponents => None,
             Self::DoubleCompression => None,
+            Self::DeprecatedV4 => None,
         }
     }
 }
@@ -200,6 +205,7 @@ impl AddrV6 {
         Ok(Self { addr })
     }
     pub fn from_string(addr: &str) -> Result<Self, Error> {
+        //
         // ensure that no two '::' appears and split into prefix and suffix
         let mut parts: Vec<Vec<String>> = String::from(addr)
             .split("::")
@@ -755,6 +761,46 @@ mod tests_v6_ok {
     fn compress_one_end() {
         expect("1:2:3:4:5:6:7::", 0x0001_0002_0003_0004_0005_0006_0007_0000);
     }
+
+    #[test]
+    fn v4_loopback_full() {
+        expect(
+            "0:0:0:0:0:ffff:127.0.0.1",
+            0x0000_0000_0000_0000_0000_ffff_7f00_0001,
+        );
+    }
+
+    #[test]
+    fn v4_loopback() {
+        expect(
+            "::ffff:127.0.0.1",
+            0x0000_0000_0000_0000_0000_ffff_7f00_0001,
+        );
+    }
+
+    #[test]
+    fn v4_unspecified() {
+        expect(
+            "::ffff:0.0.0.0",
+            0x0000_0000_0000_0000_0000_ffff_0000_0000,
+        );
+    }
+
+    #[test]
+    fn v4_subnet() {
+        expect(
+            "::ffff:255.255.254.0",
+            0x0000_0000_0000_0000_0000_ffff_ffff_fe00,
+        );
+    }
+
+    #[test]
+    fn v4_sample_addr() {
+        expect(
+            "::ffff:192.128.1.2",
+            0x0000_0000_0000_0000_0000_ffff_c0a8_0102,
+        );
+    }
 }
 
 #[cfg(test)]
@@ -841,6 +887,46 @@ mod tests_v6_fail {
     #[test]
     fn too_many_colons_4() {
         expect("1::::2", Error::DoubleCompression);
+    }
+
+    #[test]
+    fn v4_overflow() {
+        expect("::ffff:256.0.0.1", Error::Overflow);
+    }
+
+    #[test]
+    fn v4_overflow_length() {
+        expect("::ffff:255.0.0.0.1", Error::Overflow);
+    }
+
+    #[test]
+    fn v4_invalid_format() {
+        expect("::ffff:127:0:0:1", Error::Overflow);
+    }
+
+    #[test]
+    fn v4_bad_char() {
+        expect("::ffff.127.0.0.1", Error::Overflow);
+    }
+
+    #[test]
+    fn v4_deprecated() {
+        expect("::127.0.0.1", Error::DeprecatedV4);
+    }
+
+    #[test]
+    fn v4_deprecated_full() {
+        expect("::0000:127.0.0.1", Error::DeprecatedV4);
+    }
+
+    #[test]
+    fn v4_prefix_too_long() {
+        expect("1:2:3:4:5:6:ffff::127.0.0.1", Error::Overflow);
+    }
+
+    #[test]
+    fn v4_prefix_too_short() {
+        expect("1:2:3:4:ffff::127.0.0.1", Error::MissingComponents);
     }
 }
 
