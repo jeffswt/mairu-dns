@@ -8,7 +8,7 @@ pub enum Error {
     NullComponent,
     MissingComponents,
     DoubleCompression,
-    DeprecatedV4,
+    IllegalV4,
 }
 
 impl fmt::Debug for Error {
@@ -19,7 +19,7 @@ impl fmt::Debug for Error {
             Self::NullComponent => write!(f, "NullComponent"),
             Self::MissingComponents => write!(f, "MissingComponents"),
             Self::DoubleCompression => write!(f, "DoubleCompression"),
-            Self::DeprecatedV4 => write!(f, "DeprecatedV4"),
+            Self::IllegalV4 => write!(f, "IllegalV4"),
         }
     }
 }
@@ -31,7 +31,7 @@ impl fmt::Display for Error {
             Self::NullComponent => write!(f, "Empty component"),
             Self::MissingComponents => write!(f, "Missing components for IP address"),
             Self::DoubleCompression => write!(f, "Multiple '::' occurences"),
-            Self::DeprecatedV4 => write!(f, "Deprecated 4to6 address format"),
+            Self::IllegalV4 => write!(f, "Illegal 4to6 address format"),
         }
     }
 }
@@ -44,7 +44,7 @@ impl StdError for Error {
             Self::NullComponent => "Empty component",
             Self::MissingComponents => "Missing components for IP address",
             Self::DoubleCompression => "Multiple '::' occurences",
-            Self::DeprecatedV4 => "Deprecated 4to6 address format",
+            Self::IllegalV4 => "Illegal 4to6 address format",
         }
     }
     fn cause(&self) -> Option<&dyn StdError> {
@@ -54,7 +54,7 @@ impl StdError for Error {
             Self::NullComponent => None,
             Self::MissingComponents => None,
             Self::DoubleCompression => None,
-            Self::DeprecatedV4 => None,
+            Self::IllegalV4 => None,
         }
     }
 }
@@ -201,13 +201,42 @@ impl AddrV6 {
         }
         Ok(comp)
     }
+
     pub fn from_u128(addr: u128) -> Result<Self, Error> {
         Ok(Self { addr })
     }
+
+    fn regularize_v4_repr(addr: String) -> Result<String, Error> {
+        let groups: Vec<_> = addr.split(':').collect();
+        if groups.len() <= 1 {
+            return Err(Error::MissingComponents);
+        }
+        let last = groups[groups.len() - 1];
+        let addrv4 = AddrV4::from_string(last)?.addr;
+        Ok(format!(
+            "{}:{:x}:{:x}",
+            groups[0..groups.len() - 1].join(":"),
+            (addrv4 >> 16) & 0xffff,
+            addrv4 & 0xffff,
+        ))
+    }
+
     pub fn from_string(addr: &str) -> Result<Self, Error> {
-        //
+        // rfc4291, section 2.2., 3.,
+        //     An alternative form that is sometimes more convenient when
+        //     dealing with a mixed environment of IPv4 and IPv6 nodes is
+        //     x:x:x:x:x:x:d.d.d.d, where the 'x's are the hexadecimal values
+        //     of the six high-order 16-bit pieces of the address, and the 'd's
+        //     are the decimal values of the four low-order 8-bit pieces of the
+        //     address (standard IPv4 representation).
+        // regularize ipv4 address representation
+        let mut addr = String::from(addr);
+        let is_v4addr = addr.contains('.');
+        if is_v4addr {
+            addr = Self::regularize_v4_repr(addr)?;
+        }
         // ensure that no two '::' appears and split into prefix and suffix
-        let mut parts: Vec<Vec<String>> = String::from(addr)
+        let mut parts: Vec<Vec<String>> = addr
             .split("::")
             .map(|part| {
                 String::from(part)
@@ -268,6 +297,10 @@ impl AddrV6 {
         }
         if prefix.len() > 0 {
             suffix_i |= prefix_i << 16 * (8 - prefix.len());
+        }
+        // check prefix for ipv4
+        if is_v4addr && (suffix_i >> 32) != 0xffffu128 {
+            return Err(Error::IllegalV4);
         }
         Ok(Self { addr: suffix_i })
     }
@@ -780,10 +813,7 @@ mod tests_v6_ok {
 
     #[test]
     fn v4_unspecified() {
-        expect(
-            "::ffff:0.0.0.0",
-            0x0000_0000_0000_0000_0000_ffff_0000_0000,
-        );
+        expect("::ffff:0.0.0.0", 0x0000_0000_0000_0000_0000_ffff_0000_0000);
     }
 
     #[test]
@@ -798,7 +828,7 @@ mod tests_v6_ok {
     fn v4_sample_addr() {
         expect(
             "::ffff:192.128.1.2",
-            0x0000_0000_0000_0000_0000_ffff_c0a8_0102,
+            0x0000_0000_0000_0000_0000_ffff_c080_0102,
         );
     }
 }
@@ -900,33 +930,38 @@ mod tests_v6_fail {
     }
 
     #[test]
-    fn v4_invalid_format() {
-        expect("::ffff:127:0:0:1", Error::Overflow);
-    }
-
-    #[test]
     fn v4_bad_char() {
         expect("::ffff.127.0.0.1", Error::Overflow);
     }
 
     #[test]
     fn v4_deprecated() {
-        expect("::127.0.0.1", Error::DeprecatedV4);
+        expect("::127.0.0.1", Error::IllegalV4);
     }
 
     #[test]
     fn v4_deprecated_full() {
-        expect("::0000:127.0.0.1", Error::DeprecatedV4);
+        expect("::0000:127.0.0.1", Error::IllegalV4);
+    }
+
+    #[test]
+    fn v4_not_a_v4() {
+        expect("1:2:3:4:5:6:127.0.0.1", Error::IllegalV4);
     }
 
     #[test]
     fn v4_prefix_too_long() {
-        expect("1:2:3:4:5:6:ffff::127.0.0.1", Error::Overflow);
+        expect("1:2:3:4:5:6:ffff:127.0.0.1", Error::Overflow);
     }
 
     #[test]
     fn v4_prefix_too_short() {
-        expect("1:2:3:4:ffff::127.0.0.1", Error::MissingComponents);
+        expect("1:2:3:4:ffff:127.0.0.1", Error::MissingComponents);
+    }
+
+    #[test]
+    fn v4_bad_suffix() {
+        expect("0:0:0:0:0:ffff:127.0.0.1::", Error::NullComponent);
     }
 }
 
