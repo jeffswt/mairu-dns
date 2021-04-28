@@ -8,6 +8,7 @@ pub enum Error {
     UnexpectedHyphen,
     EmptyDomain,
     NotFullyQualified,
+    Overflow,
 }
 
 impl fmt::Debug for Error {
@@ -18,6 +19,7 @@ impl fmt::Debug for Error {
             Self::UnexpectedHyphen => write!(f, "UnexpectedHyphen"),
             Self::EmptyDomain => write!(f, "EmptyDomain"),
             Self::NotFullyQualified => write!(f, "NotFullyQualified"),
+            Self::Overflow => write!(f, "Overflow"),
         }
     }
 }
@@ -31,6 +33,7 @@ impl fmt::Display for Error {
             Self::NotFullyQualified => {
                 write!(f, "Domain is not a FQDN (Fully qualified domain name)")
             }
+            Self::Overflow => write!(f, "Component or domain name too long"),
         }
     }
 }
@@ -43,6 +46,7 @@ impl StdError for Error {
             Self::UnexpectedHyphen => "Unexpected hyphen (should never prefix)",
             Self::EmptyDomain => "Expected non-empty partial qualified domain name",
             Self::NotFullyQualified => "Domain is not a FQDN (Fully qualified domain name)",
+            Self::Overflow => "Component or domain name too long",
         }
     }
     fn cause(&self) -> Option<&dyn StdError> {
@@ -52,6 +56,7 @@ impl StdError for Error {
             Self::UnexpectedHyphen => None,
             Self::EmptyDomain => None,
             Self::NotFullyQualified => None,
+            Self::Overflow => None,
         }
     }
 }
@@ -78,6 +83,8 @@ impl SubdomainName {
         //     <digit> ::= any one of the ten digits 0 through 9
         if subdomain.len() == 0 {
             return Err(Error::EmptySubdomain);
+        } else if subdomain.len() >= 64 {
+            return Err(Error::Overflow);
         }
         let mut is_first_char = true;
         for ch in subdomain.chars() {
@@ -130,6 +137,17 @@ pub struct DomainName {
 
 impl DomainName {
     fn from_dn(dn: &str, is_fqdn: bool) -> Result<Self, Error> {
+        // rfc1035, section 2.3.4,
+        //     Various objects and parameters in the DNS have size limits.
+        //     They are listed below. Some could be easily changed, others are
+        //     more fundamental.
+        //     labels          63 octets or less
+        //     names           255 octets or less
+        // TODO: NOT REALLY SURE ABOUT THIS
+        if !is_fqdn && dn.len() >= 256 || is_fqdn && dn.len() > 256 {
+            return Err(Error::Overflow);
+        }
+        // split domain into buffers
         let mut subdomains: Vec<SubdomainName> = vec![];
         let mut buffer = String::default();
         for ch in dn.chars() {
@@ -344,6 +362,22 @@ mod tests_domain_ok {
     }
 
     #[test]
+    fn pqdn_comp_almost_overflow() {
+        let comp: Vec<_> = (0..7).map(|i| String::from("12345678")).collect();
+        let comp = String::from(comp.join("") + "1234567");
+        assert_eq!(comp.len(), 63);
+        pqdn_expect(&format!("www.{}.com", comp), vec!["www", &comp, "com"]);
+    }
+
+    #[test]
+    fn pqdn_name_almost_overflow() {
+        let comp = String::from("01234567890123456789012345678901234567890");
+        let dn = format!("{}.{}.{}.{}.{}.{}.okk", comp, comp, comp, comp, comp, comp);
+        assert_eq!(dn.len(), 255);
+        pqdn_expect(&dn, vec![&comp, &comp, &comp, &comp, &comp, &comp, "okk"]);
+    }
+
+    #[test]
     fn fqdn_empty() {
         fqdn_expect(".", vec![]);
     }
@@ -356,6 +390,14 @@ mod tests_domain_ok {
     #[test]
     fn fqdn_unicode() {
         fqdn_expect("xn--0zwm56d.com.", vec!["xn--0zwm56d", "com"]);
+    }
+
+    #[test]
+    fn fqdn_name_almost_overflow() {
+        let comp = String::from("01234567890123456789012345678901234567890");
+        let dn = format!("{}.{}.{}.{}.{}.{}.okk.", comp, comp, comp, comp, comp, comp);
+        assert_eq!(dn.len(), 256);
+        fqdn_expect(&dn, vec![&comp, &comp, &comp, &comp, &comp, &comp, "okk"]);
     }
 
     #[test]
@@ -422,6 +464,21 @@ mod tests_domain_fail {
     #[test]
     fn pqdn_not_fqdn() {
         expect_pqdn("www.example.com.", Error::EmptySubdomain);
+    }
+
+    #[test]
+    fn pqdn_comp_too_long() {
+        let comp: Vec<_> = (0..8).map(|i| String::from("12345678")).collect();
+        expect_pqdn(&format!("www.{}.com", comp.join("")), Error::Overflow);
+    }
+
+    #[test]
+    fn pqdn_name_too_long() {
+        let comp = String::from("01234567890123456789012345678901234567890");
+        expect_pqdn(
+            &format!("{}.{}.{}.{}.{}.{}.test", comp, comp, comp, comp, comp, comp),
+            Error::Overflow,
+        );
     }
 
     #[test]
